@@ -1,0 +1,467 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Обрезка MP3</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1d2026; --line: #2c3038; --text: #e8eaed; --muted: #8b919c;
+    --accent: #4f8cff; --sel: rgba(79,140,255,.18); --wave: #5d6675; --wave-sel: #8fb4ff; --head: #ffcf4a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, "Segoe UI", sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  #drop { border: 2px dashed var(--line); border-radius: 12px; padding: 40px 16px; text-align: center; color: var(--muted); cursor: pointer; transition: .15s; }
+  #drop.over, #drop:hover { border-color: var(--accent); color: var(--text); }
+  #drop b { color: var(--text); }
+  #editor { display: none; margin-top: 16px; }
+  .file { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+  .file .name { font-weight: 600; word-break: break-all; }
+  .file .meta { color: var(--muted); font-size: 13px; }
+  .file a { color: var(--accent); cursor: pointer; font-size: 13px; }
+  #wrap { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; height: 180px; overflow: hidden; user-select: none; touch-action: none; }
+  canvas { display: block; width: 100%; height: 100%; }
+  .ruler { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: stretch; margin-top: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; flex: 1 1 240px; }
+  .card label { display: block; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px; }
+  .tline { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  input[type=text] { width: 110px; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 7px 8px; font: 16px ui-monospace, Consolas, monospace; }
+  input[type=text]:focus { outline: none; border-color: var(--accent); }
+  button { background: #2a2f38; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 7px 11px; font: inherit; cursor: pointer; white-space: nowrap; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button.primary:hover { filter: brightness(1.1); }
+  button:disabled { opacity: .5; cursor: default; }
+  .big { font: 600 24px ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums; }
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 16px; }
+  .controls .spacer { flex: 1; }
+  .chk { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); cursor: pointer; }
+  .hint { color: var(--muted); font-size: 13px; margin-top: 14px; }
+  kbd { background: #2a2f38; border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; font-size: 12px; }
+  #status { margin-top: 10px; min-height: 1.4em; color: var(--muted); }
+  #status.err { color: #ff7b7b; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Обрезка MP3</h1>
+  <p class="sub">Выберите фрагмент песни и сохраните его отдельным файлом. Без перекодирования — качество не теряется, файл никуда не загружается.</p>
+
+  <div id="drop"><b>Перетащите MP3 сюда</b> или нажмите, чтобы выбрать файл</div>
+  <input type="file" id="file" accept=".mp3,audio/mpeg" hidden>
+
+  <section id="editor">
+    <div class="file">
+      <div><div class="name" id="fname"></div><div class="meta" id="fmeta"></div></div>
+      <a id="another">Открыть другой файл</a>
+    </div>
+
+    <div id="wrap"><canvas id="cv"></canvas></div>
+    <div class="ruler"><span>0:00</span><span id="rmid"></span><span id="rend"></span></div>
+
+    <div class="row">
+      <div class="card">
+        <label>Начало</label>
+        <div class="tline">
+          <input type="text" id="inStart">
+          <button data-nudge="start:-1">−1с</button><button data-nudge="start:-0.1">−0.1</button>
+          <button data-nudge="start:0.1">+0.1</button><button data-nudge="start:1">+1с</button>
+          <button id="setStart" title="Клавиша [">= курсор</button>
+        </div>
+      </div>
+      <div class="card">
+        <label>Конец</label>
+        <div class="tline">
+          <input type="text" id="inEnd">
+          <button data-nudge="end:-1">−1с</button><button data-nudge="end:-0.1">−0.1</button>
+          <button data-nudge="end:0.1">+0.1</button><button data-nudge="end:1">+1с</button>
+          <button id="setEnd" title="Клавиша ]">= курсор</button>
+        </div>
+      </div>
+      <div class="card" style="flex:0 1 180px">
+        <label>Длина фрагмента</label>
+        <div class="big" id="len">0:00.0</div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <button id="playSel" class="primary">▶ Слушать фрагмент</button>
+      <button id="playHead">▶ С курсора</button>
+      <button id="stop">■ Стоп</button>
+      <button id="listenEnd" title="Последние 3 секунды фрагмента">▶ Конец фрагмента</button>
+      <label class="chk"><input type="checkbox" id="loop"> по кругу</label>
+      <span class="big" id="pos" style="font-size:18px;margin-left:8px">0:00.0</span>
+      <span class="spacer"></span>
+      <button id="save" class="primary">⬇ Сохранить фрагмент</button>
+    </div>
+    <div id="status"></div>
+
+    <p class="hint">
+      Тяните синие края выделения или перетащите по волне, чтобы выделить заново. Клик — поставить курсор.
+      <kbd>Пробел</kbd> слушать/стоп · <kbd>[</kbd> начало = курсор · <kbd>]</kbd> конец = курсор.
+      Время можно вводить как <kbd>1:23.5</kbd> или <kbd>83.5</kbd>. Точность реза — около 0.03 с (один MP3-кадр).
+    </p>
+  </section>
+</main>
+
+<script>
+// ---------- MP3 frame parsing (lossless cut on frame boundaries) ----------
+const BITRATES = {
+  '1-1': [0,32,64,96,128,160,192,224,256,288,320,352,384,416,448],
+  '1-2': [0,32,48,56,64,80,96,112,128,160,192,224,256,320,384],
+  '1-3': [0,32,40,48,56,64,80,96,112,128,160,192,224,256,320],
+  '2-1': [0,32,48,56,64,80,96,112,128,144,160,176,192,224,256],
+  '2-2': [0,8,16,24,32,40,48,56,64,80,96,112,128,144,160],
+};
+BITRATES['2-3'] = BITRATES['2-2'];
+const SRATES = { 1: [44100,48000,32000], 2: [22050,24000,16000], 2.5: [11025,12000,8000] };
+
+function parseHeader(b, i) {
+  if (i + 4 > b.length || b[i] !== 0xFF || (b[i+1] & 0xE0) !== 0xE0) return null;
+  const v = (b[i+1] >> 3) & 3, l = (b[i+1] >> 1) & 3;
+  const bri = b[i+2] >> 4, sri = (b[i+2] >> 2) & 3, pad = (b[i+2] >> 1) & 1;
+  if (v === 1 || l === 0 || bri === 0 || bri === 15 || sri === 3) return null;
+  const version = v === 3 ? 1 : v === 2 ? 2 : 2.5;
+  const layer = 4 - l;
+  const br = BITRATES[(version === 1 ? 1 : 2) + '-' + layer][bri] * 1000;
+  const sr = SRATES[version][sri];
+  let size, samples;
+  if (layer === 1) { size = (Math.floor(12 * br / sr) + pad) * 4; samples = 384; }
+  else {
+    samples = (layer === 3 && version !== 1) ? 576 : 1152;
+    size = Math.floor(samples / 8 * br / sr) + pad;
+  }
+  const mono = ((b[i+3] >> 6) & 3) === 3;
+  return { size, samples, sr, version, layer, mono, br };
+}
+
+function id3v2Size(b) {
+  if (b.length < 10 || b[0] !== 0x49 || b[1] !== 0x44 || b[2] !== 0x33) return 0;
+  const s = (b[6] << 21) | (b[7] << 14) | (b[8] << 7) | b[9];
+  return 10 + s + ((b[5] & 0x10) ? 10 : 0);
+}
+
+// returns null, {xing: pos} for Xing/Info (rewritable) or {xing: -1} for VBRI (just dropped)
+function infoFrame(b, off, h) {
+  // Xing/Info sits after side info; VBRI at fixed offset 36
+  const side = h.version === 1 ? (h.mono ? 17 : 32) : (h.mono ? 9 : 17);
+  const tag = (o) => String.fromCharCode(b[o], b[o+1], b[o+2], b[o+3]);
+  const p = off + 4 + side;
+  if (p + 8 <= b.length && (tag(p) === 'Xing' || tag(p) === 'Info')) return { off, size: h.size, xing: p - off };
+  if (off + 40 <= b.length && tag(off + 36) === 'VBRI') return { off, size: h.size, xing: -1 };
+  return null;
+}
+
+// Copy of the Xing/Info frame with frame count, byte count and seek table fixed for the cut,
+// so players show the right length of VBR files
+function rebuildInfo(bytes, info, nFrames, nBytes) {
+  const f = bytes.slice(info.off, info.off + info.size);
+  const dv = new DataView(f.buffer);
+  let p = info.xing + 4;
+  const flags = dv.getUint32(p); p += 4;
+  if (flags & 1) { dv.setUint32(p, nFrames); p += 4; }
+  if (flags & 2) { dv.setUint32(p, nBytes + f.length); p += 4; }
+  if (flags & 4) { for (let i = 0; i < 100; i++) f[p + i] = Math.floor(i * 256 / 100); p += 100; }
+  if (flags & 8) p += 4;
+  // encoder delay/padding in the LAME tag no longer apply — hide the tag from decoders
+  if (p + 4 <= f.length) f.fill(0, p, p + 4);
+  return f;
+}
+
+// VBR file without any Xing header: make one from scratch (a silent Layer III frame
+// with the same format as the audio, carrying frame count, byte count and seek table)
+function makeXing(bytes, first, nFrames, nBytes) {
+  const b1 = bytes[first.off + 1], b3 = bytes[first.off + 3];
+  const h0 = parseHeader(bytes, first.off);
+  if (h0.layer !== 3) return null;
+  const v1 = h0.version === 1;
+  const hdr = [0xFF, b1 | 1, ((v1 ? 9 : 8) << 4) | (bytes[first.off + 2] & 0x0C), b3];  // 128 / 64 kbps, no CRC, no padding
+  const h = parseHeader(hdr, 0);
+  const f = new Uint8Array(h.size);
+  f.set(hdr);
+  const dv = new DataView(f.buffer);
+  let p = 4 + (v1 ? (h.mono ? 17 : 32) : (h.mono ? 9 : 17));
+  f.set([0x58, 0x69, 0x6E, 0x67], p);  // 'Xing'
+  dv.setUint32(p + 4, 7);
+  dv.setUint32(p + 8, nFrames);
+  dv.setUint32(p + 12, nBytes + f.length);
+  for (let i = 0; i < 100; i++) f[p + 16 + i] = Math.floor(i * 256 / 100);
+  return f;
+}
+
+function parseMp3(bytes) {
+  const id3 = id3v2Size(bytes);
+  const frames = [];  // {off, size, t}
+  let i = id3, t = 0, first = true, synced = false, info = null;
+  while (i + 4 <= bytes.length) {
+    const h = parseHeader(bytes, i);
+    let ok = h && i + h.size <= bytes.length;
+    // when (re)syncing, demand that the next header is valid too, to avoid false sync
+    if (ok && !synced) {
+      const n = i + h.size;
+      ok = n + 4 > bytes.length || !!parseHeader(bytes, n);
+    }
+    if (!ok) { i++; synced = false; continue; }
+    synced = true;
+    if (first) { first = false; if ((info = infoFrame(bytes, i, h))) { i += h.size; continue; } }
+    frames.push({ off: i, size: h.size, t, dur: h.samples / h.sr, br: h.br });
+    t += h.samples / h.sr;
+    i += h.size;
+  }
+  return { id3: bytes.subarray(0, id3), frames, duration: t, info };
+}
+
+function cutMp3(parsed, bytes, start, end) {
+  const audio = [];
+  let size = 0, firstFrame = null, vbr = false;
+  for (const f of parsed.frames) {
+    if (f.t + f.dur <= start) continue;
+    if (f.t >= end) break;
+    audio.push(bytes.subarray(f.off, f.off + f.size));
+    size += f.size;
+    if (!firstFrame) firstFrame = f; else if (f.br !== firstFrame.br) vbr = true;
+  }
+  const parts = [];
+  if (parsed.id3.length) parts.push(parsed.id3);  // keep title/artist/cover
+  if (parsed.info && parsed.info.xing >= 0) parts.push(rebuildInfo(bytes, parsed.info, audio.length, size));
+  else if (vbr) { const x = makeXing(bytes, firstFrame, audio.length, size); if (x) parts.push(x); }
+  return new Blob(parts.concat(audio), { type: 'audio/mpeg' });
+}
+
+// ---------- state ----------
+const $ = (id) => document.getElementById(id);
+let ctx, buffer, bytes, parsed, fileName = '';
+let duration = 0, selStart = 0, selEnd = 0, cursor = 0;
+let src = null, playStartedAt = 0, playOffset = 0, playUntil = 0, playing = false;
+let peaks = null;
+
+function fmt(s, dec = 1) {
+  s = Math.max(0, s);
+  const m = Math.floor(s / 60);
+  const sec = (s - m * 60).toFixed(dec).padStart(dec ? 3 + dec : 2, '0');
+  return m + ':' + sec;
+}
+function parseTime(str) {
+  str = str.trim().replace(',', '.');
+  if (!str) return NaN;
+  const p = str.split(':').map(Number);
+  if (p.some(isNaN)) return NaN;
+  return p.reduce((a, v) => a * 60 + v, 0);
+}
+function status(msg, err) { $('status').textContent = msg || ''; $('status').className = err ? 'err' : ''; }
+
+// ---------- loading ----------
+$('drop').onclick = $('another').onclick = () => $('file').click();
+$('file').onchange = (e) => e.target.files[0] && load(e.target.files[0]);
+const drop = $('drop');
+['dragenter','dragover'].forEach(ev => document.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave','drop'].forEach(ev => document.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
+document.addEventListener('drop', e => { const f = e.dataTransfer.files[0]; if (f) load(f); });
+
+async function load(file) {
+  stop();
+  status('Загрузка…');
+  try {
+    const ab = await file.arrayBuffer();
+    bytes = new Uint8Array(ab);
+    parsed = parseMp3(bytes);
+    if (!parsed.frames.length) throw new Error('В файле не найдено MP3-кадров. Это точно MP3?');
+    ctx = ctx || new AudioContext();
+    buffer = await ctx.decodeAudioData(ab.slice(0));
+  } catch (e) {
+    status('Не удалось открыть файл: ' + e.message, true);
+    return;
+  }
+  fileName = file.name.replace(/\.[^.]+$/, '');
+  duration = parsed.duration;
+  selStart = 0; selEnd = duration; cursor = 0;
+  const f0 = parsed.frames[0];
+  const h = parseHeader(bytes, f0.off);
+  $('fname').textContent = file.name;
+  $('fmeta').textContent = `${fmt(duration)} · ${h.sr / 1000} кГц · ${(file.size / 1048576).toFixed(1)} МБ`;
+  $('rmid').textContent = fmt(duration / 2, 0);
+  $('rend').textContent = fmt(duration, 0);
+  $('drop').style.display = 'none';
+  $('editor').style.display = 'block';
+  computePeaks();
+  sync();
+  status('');
+}
+
+// ---------- waveform ----------
+const cv = $('cv'), wrap = $('wrap');
+function computePeaks() {
+  const w = Math.max(400, Math.round(wrap.clientWidth * devicePixelRatio));
+  const chans = [];
+  for (let c = 0; c < buffer.numberOfChannels; c++) chans.push(buffer.getChannelData(c));
+  const len = chans[0].length, step = len / w;
+  peaks = new Float32Array(w);
+  for (let x = 0; x < w; x++) {
+    let max = 0;
+    const a = Math.floor(x * step), b = Math.min(len, Math.floor((x + 1) * step));
+    for (let i = a; i < b; i += 4) for (const ch of chans) { const v = Math.abs(ch[i]); if (v > max) max = v; }
+    peaks[x] = max;
+  }
+  // normalise so quiet tracks are still visible
+  let top = 0; for (const p of peaks) if (p > top) top = p;
+  if (top > 0) for (let x = 0; x < w; x++) peaks[x] /= top;
+}
+
+function draw() {
+  if (!peaks) return;
+  const W = cv.width = Math.round(wrap.clientWidth * devicePixelRatio);
+  const H = cv.height = Math.round(wrap.clientHeight * devicePixelRatio);
+  const g = cv.getContext('2d');
+  const css = getComputedStyle(document.documentElement);
+  const col = (n) => css.getPropertyValue(n).trim();
+  const xOf = (t) => t / duration * W;
+  const sx = xOf(selStart), ex = xOf(selEnd);
+
+  g.fillStyle = col('--sel'); g.fillRect(sx, 0, ex - sx, H);
+  const mid = H / 2;
+  for (let x = 0; x < W; x++) {
+    const p = peaks[Math.floor(x / W * peaks.length)] * (mid - 6);
+    g.fillStyle = x >= sx && x <= ex ? col('--wave-sel') : col('--wave');
+    g.fillRect(x, mid - p, 1, Math.max(1, p * 2));
+  }
+  // selection handles
+  g.fillStyle = col('--accent');
+  const hw = 3 * devicePixelRatio;
+  g.fillRect(sx - hw / 2, 0, hw, H); g.fillRect(ex - hw / 2, 0, hw, H);
+  g.fillRect(sx - hw * 2, 0, hw * 4, 10 * devicePixelRatio);
+  g.fillRect(ex - hw * 2, H - 10 * devicePixelRatio, hw * 4, 10 * devicePixelRatio);
+  // playhead
+  g.fillStyle = col('--head');
+  g.fillRect(xOf(currentPos()) - devicePixelRatio / 2, 0, Math.max(1, devicePixelRatio), H);
+}
+
+function sync() {
+  selStart = Math.max(0, Math.min(selStart, duration));
+  selEnd = Math.max(0, Math.min(selEnd, duration));
+  if (selEnd < selStart) [selStart, selEnd] = [selEnd, selStart];
+  if (document.activeElement !== $('inStart')) $('inStart').value = fmt(selStart, 2);
+  if (document.activeElement !== $('inEnd')) $('inEnd').value = fmt(selEnd, 2);
+  $('len').textContent = fmt(selEnd - selStart);
+  $('pos').textContent = fmt(currentPos());
+  $('save').disabled = selEnd - selStart < 0.05;
+  draw();
+}
+
+// ---------- mouse on waveform ----------
+let drag = null;
+function timeAt(e) {
+  const r = wrap.getBoundingClientRect();
+  return Math.max(0, Math.min(duration, (e.clientX - r.left) / r.width * duration));
+}
+wrap.addEventListener('pointerdown', (e) => {
+  if (!duration) return;
+  wrap.setPointerCapture(e.pointerId);
+  const t = timeAt(e), r = wrap.getBoundingClientRect();
+  const px = (s) => s / duration * r.width;
+  const x = e.clientX - r.left;
+  if (Math.abs(x - px(selStart)) < 8) drag = { kind: 'start' };
+  else if (Math.abs(x - px(selEnd)) < 8) drag = { kind: 'end' };
+  else drag = { kind: 'new', from: t, x0: e.clientX };
+});
+wrap.addEventListener('pointermove', (e) => {
+  if (!duration) return;
+  const r = wrap.getBoundingClientRect(), x = e.clientX - r.left;
+  const near = (s) => Math.abs(x - s / duration * r.width) < 8;
+  wrap.style.cursor = drag ? (drag.kind === 'new' ? 'crosshair' : 'ew-resize') : (near(selStart) || near(selEnd) ? 'ew-resize' : 'pointer');
+  if (!drag) return;
+  const t = timeAt(e);
+  if (drag.kind === 'start') { selStart = Math.min(t, selEnd); }
+  else if (drag.kind === 'end') { selEnd = Math.max(t, selStart); }
+  else if (Math.abs(e.clientX - drag.x0) > 4) { selStart = Math.min(drag.from, t); selEnd = Math.max(drag.from, t); drag.moved = true; }
+  sync();
+});
+wrap.addEventListener('pointerup', (e) => {
+  if (drag && drag.kind === 'new' && !drag.moved) {
+    // plain click: move the cursor (and keep playing from there if playing)
+    const was = playing; cursor = timeAt(e);
+    if (was) play(cursor, duration); else sync();
+  }
+  drag = null;
+});
+
+// ---------- inputs ----------
+function bindInput(el, which) {
+  const apply = () => {
+    const t = parseTime(el.value);
+    if (!isNaN(t)) { if (which === 'start') selStart = t; else selEnd = t; }
+    el.blur(); sync();
+  };
+  el.addEventListener('change', apply);
+  el.addEventListener('keydown', (e) => { if (e.key === 'Enter') apply(); e.stopPropagation(); });
+}
+bindInput($('inStart'), 'start');
+bindInput($('inEnd'), 'end');
+document.querySelectorAll('[data-nudge]').forEach(b => b.onclick = () => {
+  const [w, d] = b.dataset.nudge.split(':');
+  if (w === 'start') selStart = Math.min(selStart + +d, selEnd); else selEnd = Math.max(selEnd + +d, selStart);
+  sync();
+  if (w === 'start') play(selStart, Math.min(selEnd, selStart + 3));
+  else play(Math.max(selStart, selEnd - 3), selEnd);
+});
+$('setStart').onclick = () => { selStart = Math.min(currentPos(), selEnd); sync(); };
+$('setEnd').onclick = () => { selEnd = Math.max(currentPos(), selStart); sync(); };
+
+// ---------- playback ----------
+function currentPos() { return playing ? Math.min(playUntil, playOffset + ctx.currentTime - playStartedAt) : cursor; }
+function play(from, until) {
+  stop(true);
+  if (ctx.state === 'suspended') ctx.resume();
+  src = ctx.createBufferSource();
+  src.buffer = buffer;
+  src.connect(ctx.destination);
+  playOffset = from; playUntil = until;
+  playStartedAt = ctx.currentTime;
+  src.start(0, from, Math.max(0.01, until - from));
+  playing = true;
+  const me = src;
+  src.onended = () => {
+    if (src !== me) return;
+    playing = false; cursor = playUntil;
+    if ($('loop').checked && playOffset === selStart && playUntil === selEnd) play(selStart, selEnd);
+    else sync();
+  };
+  tick();
+}
+function stop(keepCursor) {
+  if (src) { const s = src; src = null; if (playing && !keepCursor) cursor = currentPos(); try { s.stop(); } catch {} }
+  playing = false;
+  if (duration) sync();
+}
+function tick() { if (!playing) return; sync(); requestAnimationFrame(tick); }
+$('playSel').onclick = () => play(selStart, selEnd);
+$('playHead').onclick = () => play(cursor, duration);
+$('stop').onclick = () => stop();
+$('listenEnd').onclick = () => play(Math.max(selStart, selEnd - 3), selEnd);
+
+document.addEventListener('keydown', (e) => {
+  if (!duration || e.target.tagName === 'INPUT' && e.target.type === 'text') return;
+  if (e.code === 'Space') { e.preventDefault(); playing ? stop() : play(selStart, selEnd); }
+  else if (e.key === '[' || e.code === 'BracketLeft') $('setStart').click();
+  else if (e.key === ']' || e.code === 'BracketRight') $('setEnd').click();
+});
+
+// ---------- save ----------
+$('save').onclick = () => {
+  const blob = cutMp3(parsed, bytes, selStart, selEnd);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  const tag = (s) => fmt(s, 0).replace(':', '-');
+  a.download = `${fileName} (${tag(selStart)}–${tag(selEnd)}).mp3`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  status(`Сохранено: ${a.download} · ${(blob.size / 1048576).toFixed(2)} МБ`);
+};
+
+addEventListener('resize', () => { if (buffer) { computePeaks(); draw(); } });
+</script>
+</body>
+</html>
